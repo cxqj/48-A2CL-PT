@@ -53,7 +53,7 @@ class Model(nn.Module):
         k = max(T-floor(T/self.s), 1)  # 195
         cls_x_r = self.classifier_r(x_r).permute(0,2,1)   # (32,200,101)
         cls_x_f = self.classifier_f(x_f).permute(0,2,1)   # (32,200,101)
-        cls_x_ra = cls_x_r.new_zeros(cls_x_r.shape)  # (32,200,101)
+        cls_x_ra = cls_x_r.new_zeros(cls_x_r.shape)  # (32,200,101)   擦出了动作的非动作部分的得分
         cls_x_fa = cls_x_f.new_zeros(cls_x_f.shape)  # (32,200,101)
         cls_x_rat = cls_x_r.new_zeros(cls_x_r.shape) # (32,200,101)
         cls_x_fat = cls_x_f.new_zeros(cls_x_f.shape) # (32,200,101)
@@ -61,10 +61,19 @@ class Model(nn.Module):
         mask_value = -100
 
         for i in range(self.num_class):
-            mask_r = cls_x_r[:,:,i]>torch.kthvalue(cls_x_r[:,:,i], k, dim=1, keepdim=True)[0]   # (32,200)
-            x_r_erased = torch.masked_fill(x_r, mask_r.unsqueeze(1), 0)  # (32,1024,200)
+            """
+            torch.kthvalue(input, k, dim=None, out=None) -> (Tensor, LongTensor):取输入张量input指定维度上第k个最小值，若不指定dim，
+            则默认为input的最后一维。返回一个元组，其中indices是原始输入张量input中沿dim维的第k个最小值下标。
+               input(Tensor) - 输入张量
+               k(int) - 第k个最小值
+               dim(int, optional)` - 沿着此维度进行排序
+               out(tuple, optional) - 输出元组
+            """
+            mask_r = cls_x_r[:,:,i]>torch.kthvalue(cls_x_r[:,:,i], k, dim=1, keepdim=True)[0]   # (32,200)   也就是将每一个类别的特征前195时间维度的特征置为0
+            x_r_erased = torch.masked_fill(x_r, mask_r.unsqueeze(1), 0)  # (32,1024,200)  非动作区域的特征，屏蔽了动作部分的特征
+            # masked_fill_(mask, value)用value填充 self tensor 中的元素, 当对应位置的 mask 是1.
             cls_x_ra[:,:,i] = torch.masked_fill(self.classifier_ra[i](x_r_erased).squeeze(1), mask_r, mask_value)  # (32,200,101)
-            cls_x_rat[:,:,i] = self.classifier_ra[i](x_r).squeeze(1)  # (32,200,101)
+            cls_x_rat[:,:,i] = self.classifier_ra[i](x_r).squeeze(1)  # (32,200,101)    和cls_x_r有什么区别 
 
             mask_f = cls_x_f[:,:,i]>torch.kthvalue(cls_x_f[:,:,i], k, dim=1, keepdim=True)[0]  # (32,200)
             x_f_erased = torch.masked_fill(x_f, mask_f.unsqueeze(1), 0)   # (32,1024,200)
