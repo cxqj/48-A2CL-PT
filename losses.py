@@ -30,24 +30,24 @@ class MILLoss(nn.Module):
 class ACLPT_func(Function):
     @staticmethod
     def forward(ctx, featureH, featureL, label, centers, margins, gamma):
-        # N'x1024, (N',), Cx1024
+        # fH:(N',1024) fL:(N',1024) lab:(N',) centers:(101,1024) margins:[2,1] gamma:0.6
         ctx.save_for_backward(featureH, featureL, label, centers, margins, gamma)
-        num_pair = featureH.shape[0]
-        num_class = centers.shape[0]
-        centers_normed = F.normalize(centers, dim=1) # Cx1024
+        num_pair = featureH.shape[0]  # 25
+        num_class = centers.shape[0]  # 101
+        centers_normed = F.normalize(centers, dim=1)   # Cx1024
         featureH_normed = F.normalize(featureH, dim=1) # N'x1024
-        distmatH = torch.acos(torch.mm(featureH_normed, centers_normed.t())) # N'xC
+        distmatH = torch.acos(torch.mm(featureH_normed, centers_normed.t()))  # N'x C
         featureL_normed = F.normalize(featureL, dim=1)
-        distmatL = torch.acos(torch.mm(featureL_normed, centers_normed.t()))
+        distmatL = torch.acos(torch.mm(featureL_normed, centers_normed.t()))  # N'x C
         mask = distmatH.new_zeros(distmatH.size(), dtype=torch.long)
-        mask.scatter_add_(1, label.long().unsqueeze(1), torch.ones(num_pair, 1, device=mask.device, dtype=torch.long))
+        mask.scatter_add_(1, label.long().unsqueeze(1), torch.ones(num_pair, 1, device=mask.device, dtype=torch.long))  # (N', 101)
 
-        distHic = distmatH[mask==1]
-        distLic = distmatL[mask==1]
-        distHicL = torch.min(distmatH[mask==0].view(num_pair, num_class-1), dim=1)[0]
-        li1 = distHic-distLic+margins[0]
-        li2 = distHic-distHicL+margins[1]
-        loss = li1[li1>0].sum() * gamma[0] + li2[li2>0].sum()
+        distHic = distmatH[mask==1]   # 每一个feature对应类别的距离  (N')
+        distLic = distmatL[mask==1]   # 每一个feature对应类别的距离  (N')
+        distHicL = torch.min(distmatH[mask==0].view(num_pair, num_class-1), dim=1)[0]  # (N')
+        li1 = distHic-distLic+margins[0]   # (N')
+        li2 = distHic-distHicL+margins[1]  # (N')
+        loss = li1[li1>0].sum() * gamma[0] + li2[li2>0].sum()  # gamma[0] = 0.6
         return loss/num_pair
 
     @staticmethod
@@ -129,16 +129,16 @@ class A2CLPTLoss(nn.Module):
     def __init__(self, device, num_class, dim_feature=1024, alpha=1, beta_l=0.001, beta_h=0.1, margin1=2, margin2=1, gamma=0.6):
         super(A2CLPTLoss, self).__init__()
         self.device = device
-        self.num_class = num_class
-        self.dim_feature = dim_feature
-        self.alpha = alpha
-        self.beta_l = beta_l
-        self.beta_h = beta_h
-        self.margin1 = margin1
-        self.margin2 = margin2
-        self.gamma = gamma
-        self.centers1 = nn.Parameter(torch.randn(num_class, dim_feature, device=device))
-        self.centers2 = nn.Parameter(torch.randn(num_class, dim_feature, device=device))
+        self.num_class = num_class      # 101
+        self.dim_feature = dim_feature  # 1024
+        self.alpha = alpha  # 1
+        self.beta_l = beta_l # 0.001
+        self.beta_h = beta_h  # 0.1
+        self.margin1 = margin1 # 2
+        self.margin2 = margin2 # 1
+        self.gamma = gamma # 0.6
+        self.centers1 = nn.Parameter(torch.randn(num_class, dim_feature, device=device))  # (101,1024)
+        self.centers2 = nn.Parameter(torch.randn(num_class, dim_feature, device=device))  # (101,1024)
         self.normalize_centers()
         self.ith = 5000
 
@@ -153,7 +153,7 @@ class A2CLPTLoss(nn.Module):
     def forward(self, logits, cas, len_features, label, iters):
         # NxT'x1024, NxT'x101, [T1', T2', ..., TN'], Nx101, scalar
         loss = 0
-        list_pair = []
+        list_pair = []  # [(0,89),...(31,62)], 第一个为batch索引，第二个为类别
         for j in range(len(len_features)):
             #if label[j].sum() == 1:
             if label[j].sum() == 1 or (label[j].sum() > 0 and iters >= self.ith):
@@ -161,21 +161,25 @@ class A2CLPTLoss(nn.Module):
                     list_pair.append((j, c.squeeze()))
 
         if list_pair:
-            num_pair = len(list_pair)
-            beta1 = torch.FloatTensor(num_pair).uniform_(self.beta_l, self.beta_h).to(self.device)
-            beta2 = torch.FloatTensor(num_pair).uniform_(self.beta_l, self.beta_h).to(self.device)
+            num_pair = len(list_pair)  # 一个batch_size中带有标注的特征数量
+            beta1 = torch.FloatTensor(num_pair).uniform_(self.beta_l, self.beta_h).to(self.device)  # N', （0.001，0.1）
+            beta2 = torch.FloatTensor(num_pair).uniform_(self.beta_l, self.beta_h).to(self.device)  # N', （0.001，0.1）
+            # 第一种attention后的特征
             aHf1 = torch.zeros(num_pair, self.dim_feature, device=self.device) # N'x1024 (N': the number of features with annotation)
             aLf1 = torch.zeros(num_pair, self.dim_feature, device=self.device)
+            # 第二种attention后的特征
             aHf2 = torch.zeros(num_pair, self.dim_feature, device=self.device) # N'x1024 (N': the number of features with annotation)
             aLf2 = torch.zeros(num_pair, self.dim_feature, device=self.device)
+            
             lab = torch.zeros(num_pair, device=self.device) # (N',)
             for i, (j, c) in enumerate(list_pair):
-                atn1 = F.softmax(cas[0][j][:len_features[j]], dim=0) # Ti'x101
-                atn1L = F.softmax(beta1[i]*cas[0][j][:len_features[j]], dim=0)
-                Hf1 = torch.mm(logits[j][:len_features[j]].permute(1,0), atn1) # 1024xTi', Ti'x101-> 1024x101
-                Lf1 = torch.mm(logits[j][:len_features[j]].permute(1,0), atn1L)
+                atn1 = F.softmax(cas[0][j][:len_features[j]], dim=0) # Ti'x101  动作的attention  每个视频实际特征长度 x 101  沿着时间维度做attention
+                atn1L = F.softmax(beta1[i]*cas[0][j][:len_features[j]], dim=0)   # 非动作的attention   
+                Hf1 = torch.mm(logits[j][:len_features[j]].permute(1,0), atn1)   # 1024xTi', Ti'x101-> 1024x101   获得高权重的动作聚合特征
+                Lf1 = torch.mm(logits[j][:len_features[j]].permute(1,0), atn1L)  # 1024xTi', Ti'x101-> 1024x101   获得低权重的非动作聚合特征
                 aHf1[i] = Hf1[:,c] # (1024,)
                 aLf1[i] = Lf1[:,c]
+                
                 atn2 = F.softmax(cas[1][j][:len_features[j]], dim=0) # Ti'x101
                 atn2L = F.softmax(beta2[i]*cas[1][j][:len_features[j]], dim=0)
                 Hf2 = torch.mm(logits[j][:len_features[j]].permute(1,0), atn2) # 1024xTi', Ti'x101-> 1024x101
