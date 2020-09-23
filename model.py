@@ -83,4 +83,5 @@ class Model(nn.Module):
         tcam = (cls_x_r+cls_x_rat*self.omega) * self.mul_r + (cls_x_f+cls_x_fat*self.omega) * self.mul_f  # # (32,200,101)
 
         # (32,200,1024) [(32,200,101),(32,200,101)], (32,200,1024) [(32,200,101),(32,200,101)],  (32,200,101)
+        # cls_x_r: 动作部分   cls_x_ra: 非动作部分
         return x_r.permute(0,2,1), [cls_x_r, cls_x_ra], x_f.permute(0,2,1), [cls_x_f, cls_x_fa], tcam
