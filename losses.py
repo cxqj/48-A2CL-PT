@@ -189,6 +189,7 @@ class A2CLPTLoss(nn.Module):
             
             lab = torch.zeros(num_pair, device=self.device) # (N',)
             for i, (j, c) in enumerate(list_pair):
+                ############# 第一个分支的结果 ###############
                 # 论文公式(2)
                 atn1 = F.softmax(cas[0][j][:len_features[j]], dim=0) # Ti'x101  动作的attention  每个视频实际特征长度 x 101  沿着时间维度做attention
                 """
@@ -202,6 +203,7 @@ class A2CLPTLoss(nn.Module):
                 aHf1[i] = Hf1[:,c] # (1024,)
                 aLf1[i] = Lf1[:,c]
                 
+                ############ 第二个分支的结果 #################
                 atn2 = F.softmax(cas[1][j][:len_features[j]], dim=0) # Ti'x101
                 atn2L = F.softmax(beta2[i]*cas[1][j][:len_features[j]], dim=0)
                 Hf2 = torch.mm(logits[j][:len_features[j]].permute(1,0), atn2) # 1024xTi', Ti'x101-> 1024x101
