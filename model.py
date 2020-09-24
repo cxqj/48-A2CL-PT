@@ -93,3 +93,4 @@ class Model(nn.Module):
         # cls_x_r: 动作部分   cls_x_ra: 非动作部分
         return x_r.permute(0,2,1), [cls_x_r, cls_x_ra], x_f.permute(0,2,1), [cls_x_f, cls_x_fa], tcam
     
+    
