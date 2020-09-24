@@ -258,6 +258,8 @@ def load_and_assign_weights(model):
                 print (' name? ' + name)
     else:
         print ('no weight file. start from scratch')
+        
+        
 
 
 if __name__ == '__main__':
