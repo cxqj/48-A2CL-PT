@@ -34,18 +34,34 @@ class ACLPT_func(Function):
         ctx.save_for_backward(featureH, featureL, label, centers, margins, gamma)
         num_pair = featureH.shape[0]  # 25
         num_class = centers.shape[0]  # 101
+        # 论文公式(5)
         centers_normed = F.normalize(centers, dim=1)   # Cx1024
+        
         featureH_normed = F.normalize(featureH, dim=1) # N'x1024
         distmatH = torch.acos(torch.mm(featureH_normed, centers_normed.t()))  # N'x C
+        
         featureL_normed = F.normalize(featureL, dim=1)
         distmatL = torch.acos(torch.mm(featureL_normed, centers_normed.t()))  # N'x C
+        
         mask = distmatH.new_zeros(distmatH.size(), dtype=torch.long)
         mask.scatter_add_(1, label.long().unsqueeze(1), torch.ones(num_pair, 1, device=mask.device, dtype=torch.long))  # (N', 101)
 
         distHic = distmatH[mask==1]   # 每一个feature对应类别的距离  (N')
         distLic = distmatL[mask==1]   # 每一个feature对应类别的距离  (N')
         distHicL = torch.min(distmatH[mask==0].view(num_pair, num_class-1), dim=1)[0]  # (N')
-        li1 = distHic-distLic+margins[0]   # (N')
+        """
+        论文公式(7)
+        Optimizing this loss function makes the background features more distinguishable from the activity features.
+        """
+        li1 = distHic-distLic+margins[0]   # (N')   # 该损失函数是为了使得前景和背景的特征区分度更高
+        # 论文公式(4)  
+        """
+        Optimizing the loss function of Eq. 4 ensures that the video-level features of
+        the same activity class are grouped together and that the inter-class variations
+        of those features are maximized at the same time. As a result, the embedded
+        features are learned to be discriminative and T-CAM will have higher values for
+        the activity-related features.
+        """
         li2 = distHic-distHicL+margins[1]  # (N')
         loss = li1[li1>0].sum() * gamma[0] + li2[li2>0].sum()  # gamma[0] = 0.6
         return loss/num_pair
@@ -173,10 +189,16 @@ class A2CLPTLoss(nn.Module):
             
             lab = torch.zeros(num_pair, device=self.device) # (N',)
             for i, (j, c) in enumerate(list_pair):
+                # 论文公式(2)
                 atn1 = F.softmax(cas[0][j][:len_features[j]], dim=0) # Ti'x101  动作的attention  每个视频实际特征长度 x 101  沿着时间维度做attention
-                atn1L = F.softmax(beta1[i]*cas[0][j][:len_features[j]], dim=0)   # 非动作的attention   
+                """
+                 it is supposed to havelower values for the activity features and higher values 
+                 for the background features when compared to the original attention
+                """
+                atn1L = F.softmax(beta1[i]*cas[0][j][:len_features[j]], dim=0)   # 非动作的attention  论文公式(6)
+                # 论文公式(3)
                 Hf1 = torch.mm(logits[j][:len_features[j]].permute(1,0), atn1)   # 1024xTi', Ti'x101-> 1024x101   获得高权重的动作聚合特征
-                Lf1 = torch.mm(logits[j][:len_features[j]].permute(1,0), atn1L)  # 1024xTi', Ti'x101-> 1024x101   获得低权重的非动作聚合特征
+                Lf1 = torch.mm(logits[j][:len_features[j]].permute(1,0), atn1L)  # 1024xTi', Ti'x101-> 1024x101   should attend more strongly to the background features than Fri is.
                 aHf1[i] = Hf1[:,c] # (1024,)
                 aLf1[i] = Lf1[:,c]
                 
