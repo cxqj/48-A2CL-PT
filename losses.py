@@ -48,6 +48,7 @@ class ACLPT_func(Function):
 
         distHic = distmatH[mask==1]   # 每一个feature对应类别的距离  (N')
         distLic = distmatL[mask==1]   # 每一个feature对应类别的距离  (N')
+        # 和当前类距离距离最近的负样本
         distHicL = torch.min(distmatH[mask==0].view(num_pair, num_class-1), dim=1)[0]  # (N')
         """
         论文公式(7)
